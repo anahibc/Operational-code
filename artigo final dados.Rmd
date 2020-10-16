@@ -1,0 +1,726 @@
+---
+title: "Código operacional e motivação"
+author: "Anahi"
+date: "14/10/2020"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("D:\\dados")
+```
+
+  Carregamento de pacotes e omitindo os warnings
+```{r,warning = FALSE, message = FALSE, echo = FALSE}
+
+require(magrittr)
+require(tidyverse)
+require(dplyr)
+require(hnp)
+require(stargazer)
+require(tinytex)
+require(texPreview)
+library(PerformanceAnalytics)
+library(gridExtra)
+library(car)
+library(dplyr)
+library(ggplot2)
+library(knitr) 
+library(QuantPsyc)  
+library(DT)
+library(haven)
+library(pscl)
+library(rstatix)
+library(sjPlot)
+library(margins)
+library(dotwhisker)
+library(rmarkdown)
+library(ggthemes)
+# load functions
+source("https://slcladal.github.io/rscripts/multiplot.r")
+source("https://slcladal.github.io/rscripts/slrsummary.r")
+source("https://slcladal.github.io/rscripts/SampleSizeMLR.r")
+source("https://slcladal.github.io/rscripts/ExpR.r")
+```
+
+Importando o banco de dados
+```{r, warning = FALSE, message = FALSE}
+url <- "https://raw.githubusercontent.com/anahibc/Operational-code/main/unifica.csv"
+download.file(url, "unifica.csv", mode = "wb")
+dados<- read_csv2("unifica.csv")
+
+paged_table(dados)
+```
+```{r}
+hdados<-head(dados)
+knitr::kable(hdados, col.names = gsub("[.]", " ", names(dados)))
+
+```
+
+Convertendo Presidente e ideologia em variáveis categóricas
+```{r, warning = FALSE, message = FALSE}
+dados$Presidente=as.factor(dados$Presidente)
+dados$ideologia=as.factor(dados$ideologia)
+
+```
+
+```{r, warning = FALSE, message = FALSE}
+#Renomeando a coluna de ideologia politica - simplificando os niveis
+
+df_menor <- dados %>%
+  mutate(alinhamento = case_when(ideologia == "esquerda" ~ "esquerda",
+                              ideologia == "centro esquerda" ~ "esquerda",
+                              ideologia == "centro direita" ~ "direita",
+                              ideologia == "direita" ~ "direita"))
+
+df_menor$alinhamento<-as.factor(df_menor$alinhamento)
+```
+```{r}
+# Renomeando mês
+df_menor <- df_menor %>%
+  rename(mes = month)
+#Convertendo as variÃ¡veis em categorias para o banco de dados menor
+df_menor$mes<-as.factor(df_menor$mes)
+
+```
+
+```{r,warning = FALSE, message = FALSE}
+#Selecionando variaveis para df_menor como tibble
+df_menor=as_tibble(df_menor)
+```
+Estrutura dos dados
+```{r,warning = FALSE, message = FALSE}
+str(df_menor)
+```
+***Análise exploratória de dados***
+```{r,warning = FALSE, message = FALSE}
+print(summarytools::dfSummary(df_menor), style = 'grid', graph.magnif = 0.75, valid.col = FALSE, tmp.img.dir = "/tmp", method = 'render')
+
+mydata <- summarytools::descr(df_menor)
+
+print(mydata , method = 'render')
+
+```
+**Boxplots e Histograma**
+```{r}
+p1 <- ggplot(df_menor, aes(P1, Presidente)) +   # data + x/y-axes
+  geom_boxplot(fill=c("grey30","grey40","grey50",  "grey70")) + # def. col.
+  theme_bw(base_size = 8)+   # black and white theme
+  labs(x = "") +                        # x-axis label
+  labs(y = "P1", cex = .75) +   # y-axis label  # y-axis range
+  guides(fill = FALSE) +                # no legend
+  ggtitle("Presidente")       
+# title
+# plot 2
+p2 <- ggplot(df_menor, aes(P1, alinhamento)) +
+  geom_boxplot(fill=c("grey30", "grey70")) +
+  theme_bw(base_size = 8) +
+  labs(x = "") +                              # x-axis label
+  labs(y = "P1") +  # y-axis label
+  guides(fill = FALSE) +
+  ggtitle("Alinhamento")
+# plot 3
+p3 <- ggplot(df_menor, aes(x = P1)) +
+  geom_histogram(aes(y=..density..),    # add density statistic
+                 binwidth = 3,         # def. bin width
+                 colour = "black",      # def. bar edge colour
+                 fill = "white") +      # def. bar col.
+  theme_bw() +                        # black-white theme
+  geom_density(alpha=.2, fill = "gray50") + # def. col. of overlay
+  labs(x = "P1") +
+  labs(y = "Frequencia - densidade")
+# plot 4
+# show plots
+grid.arrange(grobs = list(p1, p2, p3), widths = c(1, 1),
+             layout_matrix = rbind(c(1, 2), c(3, 4)))
+```
+```{r}
+ggplot(df_menor, aes(Presidente, fill = alinhamento)) +
+  geom_density(alpha = 0.3)
+```
+
+
+***Observação***
+
+O histograma para a variável resposta P1 está limitado entre 0 e 1, indicando que a distribuição normal não se mostra adequada, de modo que seria recomendado um ajuste por meio de modelo lineares generalizados. Seriam utilizados dados para proporção e limitados ao intervalo 0 e 1, sendo uma possível estratégia a distribuição beta. No entanto, optou-se por não realizar o ajuste que exige mais acurácia.
+
+
+```{r}
+#correlação
+
+df=df_menor[,-c(1:5,11)]
+str(df)
+chart.Correlation(df, histogram=TRUE, pch=19)
+```
+
+Por meio da correlação percebe-se que as correlações entre as variáveis indepentendes e a variável dependente P1 é baixa porém significativa (p<0.01). Além disso, as covariáveis também apresentam valores de correlações significativas tais como PWR e AFF, entre outras. Isto pode vir a ser um problema na análise pois pode sugerir multicolineariedade. 
+
+***Primeiro modelo***
+
+Inicialmente foi ajustado um modelo completo com todas as variáveis que podem influenciar a variável P1, porém neste modelo houve o acréscimo dos efeitos de interação entre os presidentes e as variáveis independentes (PWR, AFF, ACH, I1).
+
+```{r, warning = FALSE, message = FALSE}
+model=lm(P1~Presidente+PWR+AFF+ACH+I1+mes+Presidente*PWR+Presidente*AFF+Presidente*ACH+Presidente*I1, data=df_menor)
+
+```
+
+A partir deste modelo foi feita uma seleção de variáveis por meio da técnica de stepwise.
+
+```{r, warning = FALSE, message = FALSE}
+model1=step(model)
+summary(model1)
+stargazer(model1, type="text")
+```
+
+
+***Segundo modelo***
+
+Antes de serem analisados os resíduos e as outras métricas de ajustes envolvidas na regressão, optou-se por realizar um segundo modelo via proposta de Collet (1994). Nesta proposta, há mais liberdade para o pesquisador, as variaveis são retiradas conforme com o valor do P-Valor e recolocadas até que se alcance um modelo com todas a variaveis significativas. Além da autonomia do pesquisador, o método de Collet evita um erro comum no método automático que pode eliminar variáveis importantes para o modelo.
+
+```{r}
+
+m1=lm(P1~Presidente+PWR+AFF+ACH+I1+mes+Presidente*ACH+Presidente*AFF+Presidente*PWR, data=df_menor)
+
+#resumo do modelo m1 de Collet
+summary(m1) 
+
+```
+
+```{r}
+#resumo do modelo m2 de Collet
+summary(m2 <- update(m1, . ~ . - mes))
+#resumo do modelo m3 de Collet
+summary(m3 <- update(m2, . ~ . - I1))
+```
+
+***Modelo mais robusto pela proposta de Collet foi o m3***.
+
+Para tomar a decisão entre o modelo stepwise e o modelo m3 de Collet, Foi realizada a criação de uma tabela comparativa dos modelos finais de ambos os métodos. Apesar de ambos serem muito próximos, o modelo m3 de Collet tem maior R² ajustado e o valor de AIC está dentro de uma diferença em um intervalo muito pequeno de AIC. Ademais para o estudo realizado é importante que o modelo conste de das variáveis AFF, ACH e PWR, uma vez que são fundamentais para a análise do presente trabalho. 
+
+
+```{r}
+metric1=cbind("Modelo_stepwise",extractAIC(model1)[2], summary(model1)$adj.r.squared*100)
+metric2=cbind("Modelo_collet",extractAIC(m3)[2], summary(m3)$adj.r.squared*100)
+AICs=rbind(metric1,metric2)
+
+knitr::kable(AICs, col.names = c("Modelo","AIC","RÂ² ajustado"))
+```
+
+
+
+***Detecção de outlier***
+Depois de implementar a regressão múltipla, é necessário verificar se o modelo *m3* apresenta outliers. Em seguida, é realizado o diagnóstico, testando se a remoção de observações discrepantes diminui desproporcionalmente o ajuste do modelo, ou se aperfeiçoa o modelo.
+
+***Gráficos de diagnóstico***
+Em seguida são gerados os gráficos de verificação de homogeneidade de variâncias, de verificação de normalidade e relação de pontos influentes e outliers. 
+
+***Análise de resíduos***
+Foi realizada a análise de resíduos em que pode-se apontar alguns fatores presentes na análise com respeito aos pressupostos. Primeiro a normalidade não pode ser verificada por meio do qqnorm. Segundo há pontos influentes e outliers que foram identificados logo abaixo. Neste sentido, foi feita a remoção dos valores discrepantes e um novo ajuste.
+
+```{r}
+par(mfrow=c(2,2))
+plot(m3)
+```
+```{r}
+par(mfrow=c(1,1))
+hnp(m3,how.many.out = TRUE,print.on = TRUE)#retirar pontos
+```
+
+É importante verificar que de acordo half norm plot - hnp, mais de 10% das observações estão fora das bandas de confiança indicando que não há normalidade dos resíduos. O que leva a fazer uma checagem mais aprofundada sobre pontos de alavanca e outliers, para uma possível remoção.
+
+
+
+```{r, warning = FALSE, message = FALSE}
+cooksd <- cooks.distance(m3)
+```
+
+
+Pontos influentes
+
+```{r}
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")+
+ abline(h = 4*mean(cooksd, na.rm=T), col="red")+
+  text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd,     na.rm=T),names(cooksd),""), col="red") 
+```
+
+
+```{r}
+influential <- as.numeric(names(cooksd)[(cooksd > 4*mean(cooksd, na.rm=T))])  # influential row numbers
+head(df_menor[influential, ])  # influential observations.
+
+car::outlierTest(m3)
+```
+
+
+```{r}
+outliers <- boxplot(m3$residuals, plot=FALSE)$out
+outliers
+
+df_menor[which(m3$residuals %in% outliers),]
+
+```
+
+Remoção de Outlier
+
+```{r}
+df_menor_out <- df_menor[-which(m3$residuals %in% outliers),]
+df_menor_out
+```
+
+Os novos gráficos de diagnóstico não indicam outliers que requerem remoção, apenas alguns pontos influentes que não serão removidos.
+
+***Reajustando o modelo m3 sem outliers***
+
+Segunda Modelagem *m3* sem os pontos influentes e outiliers previamente retirados
+
+```{r, warning = FALSE, message = FALSE}
+m1=lm(P1~Presidente+PWR+AFF+ACH+I1+mes+Presidente*ACH+Presidente*AFF+Presidente*PWR, data=df_menor_out)
+summary(m1)
+```
+
+```{r, warning = FALSE, message = FALSE}
+summary(m2 <- update(m1, . ~ . - mes))
+```
+
+```{r,  warning = FALSE, message = FALSE}
+summary(m3 <- update(m2, . ~ . - I1))
+confint(m3)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(m3)
+```
+
+Conforme o gráfico abaixo, não há pontos a retirar.
+
+```{r}
+par(mfrow=c(1,1))
+set.seed(2014)
+hnp(m3,how.many.out = TRUE,print.on = TRUE)# Indica que pontos precisam ser retirados
+```
+
+Com relação a tais pontos de dados, os seguintes parâmetros devem ser considerados.
+Devem ser removidos:
+1- Os pontos de dados com resíduos padronizados> 3,29 
+2- os pontos de dados com valores D de Cook> 1  
+3- os pontos de dados com valores de alavancagem 3 ( k + 1 ) / n (k = Número de preditores, N = Número de casos no modelo) 
+
+Ademais não pode haver autocorrelação entre os preditores. Isso significa que as variáveis independentes não podem ser correlacionadas consigo mesmas (por exemplo, porque os pontos de dados vêm do mesmo sujeito). Se houver autocorrelação entre os preditores, então, um Projeto de Medidas Repetidas ou um modelo (hierárquico) de efeitos mistos deve ser implementado.
+
+Quanto à multicolinearidade, os preditores não podem se correlacionar substancialmente entre si. Se um modelo contém preditores com fatores de inflação de variância (VIF)> 10, o modelo não é confiável (Myers 1990 ) e os preditores que causam esses VIFs devem ser removidos.
+
+```{r}
+mlrdata=df_menor_out
+mlrdata$residuals <- resid(m3)
+mlrdata$standardized.residuals <- rstandard(m3)
+mlrdata$studentized.residuals <- rstudent(m3)
+mlrdata$cooks.distance <- cooks.distance(m3)
+mlrdata$dffit <- dffits(m3)
+mlrdata$leverage <- hatvalues(m3)
+mlrdata$covariance.ratios <- covratio(m3)
+mlrdata$fitted <- m3$fitted.values
+```
+
+Agora podemos usar essas estatísticas de diagnóstico para criar gráficos de diagnóstico mais precisos.
+
+```{r}
+# plot 5
+p5 <- ggplot(mlrdata,
+             aes(studentized.residuals)) +
+  theme(legend.position = "none") +
+  theme_set(theme_bw(base_size = 8))+
+  geom_histogram(aes(y=..density..),
+                 binwidth = 1,
+                 colour="black",
+                 fill="white") +
+  labs(x = "Studentized Residual", y = "Density") +
+  stat_function(fun = dnorm,
+                args = list(mean = mean(mlrdata$studentized.residuals, na.rm = TRUE),
+                            sd = sd(mlrdata$studentized.residuals, na.rm = TRUE)),
+                colour = "red", size = 1)
+# plot 6
+p6 <- ggplot(mlrdata, aes(fitted, studentized.residuals)) +
+  geom_point() +
+  geom_smooth(method = "lm", colour = "Red")+
+  theme_bw(base_size = 8)+
+  labs(x = "Fitted Values",
+       y = "Studentized Residual")
+# plot 7
+p7 <- qplot(sample = mlrdata$studentized.residuals, stat="qq") +
+  theme_bw(base_size = 8) +
+  labs(x = "Theoretical Values",
+       y = "Observed Values")
+grid.arrange(p5, p6, p7, nrow = 1)
+
+```
+
+Teste de autocorrelação
+
+```{r}
+dwt(m3)
+```
+
+Teste de multicolinearidade
+
+```{r}
+vif(m3)
+
+mean(vif(m3))
+```
+
+O valor do Vif não deve ultrapassar 10 e o Vif médio não deve exceder 1, portanto, o modelo carece de robustez por apresentar alta multicolinearidade.
+
+
+Comparação entre modelo final e  modelo base para testar se o modelo final supera significativamente o modelo de base.
+```{r}
+#compare baseline- and minimal adequate model
+m0=lm(P1~1, data=df_menor)
+Anova(m0, m3, type = "III")
+```
+
+A comparação entre os dois modelos confirma que o modelo mínimo adequado tem um desempenho significativamente melhor (faz estimativas significativamente mais precisas da variável de resultado) em comparação com o modelo de base.
+
+*Como última etapa, resumimos os resultados da análise de regressão.*
+
+```{r}
+stargazer(m1, m2, m3, type="text",
+          dep.var.labels=c("P1"),
+          covariate.labels=c("Presidente","PWR","AFF","ACH", "Presidente:ACH",
+                             "Presidente:AFF","Presidente:PWR"), out="models.text")
+```
+
+
+Comparação entre os três modelos
+
+```{r}
+dwplot(list(m1,
+            m2,
+            m3),
+vline = geom_vline(xintercept = 0, colour = "grey60", linetype = 2))
+
+```
+
+Os resultados da análise de regressão realizada acima podem ser resumidos da seguinte forma:
+Uma regressão linear múltipla foi ajustada aos dados usando um procedimento automatizado, passo a passo, baseado em AIC (Akaike’s Information Criterion) e um baseado na proposta de Collet (1994).
+Com o ajuste do modelo chegou-se a um modelo final dado pela proposta de collet.
+Durante o diagnóstico do modelo, outliers foram detectados e removidos. Diagnósticos adicionais encontraram alguns problemas após a remoção desses outiliers (após o reajuste do modelo), chamando a atenção para o problema mais grave que foi a detecção de multicolinearidade. O modelo de regressão adequado final é baseado em 164 observações e tem um desempenho significativamente melhor do que um modelo de base (R2 ajustado : 0,393, estatística F (15, 148): 8.040***, AIC: -628), superior ao AIC inicial de -605 do modelo sem retirada de outilier e superior também ao AIC do modelo selecionado por stepwise (-607).
+
+ O modelo de regressão adequado final tem como como efeitos principais significativos Presidente, PWR, AFF, ACH. Por enquanto excluindo-se da interpretação os efeitos de interação tem-se: A variável Presidente categórica indica que há um modelo para cada Presidente, ou seja, em relação a P1 existe diferença entre os presidentes. Além disso, o efeito de PWR, AFF e ACH também influênciam (p <0,001∗ ∗ ∗) de forma positiva no escore de P1.
+
+Além disso, o modelo de regressão final adequado relata uma interação altamente significativa entre o efeito de Presidente e AFF; Presidente e PWR; Presidente e ACH. (p <0,001∗ ∗ ∗). Assim por meio de interpretação de variáveis dummys do modelo de regressão multipla temos:
+
+Se o Presidente for o Bolsonaro
+
+Para ACH:
+tem -se o modelo P1=β0+β1ACH em que é dados por β0=0,0427 e β1=12,90, de forma que, há um acréscimo de 0,1032 em média em P1 para cada acréscimo médio de 0.008 em ACH.
+
+Para AFF:
+tem -se o modelo P1=β0+β1AFF em que é dados por β0=0,0427 e β1=21,88 há um acréscimo de 0,26 em P1 para cada acréscimo médio de 0,012 em AFF.
+
+Para PWR:
+tem -se o modelo P1=β0+β1PWR em que é dados por β0=0,0427 e β1=7,62 há um acréscimo de 0,0609 em P1 para cada acréscimo médio de 0,008 em PWR.
+
+Se o Presidente for o Duque
+
+Para ACH:
+tem -se o modelo P1=β0+β1ACH em que é dados por β0=0,77 e β1=-5,81, de forma que, há um decréscimo de -0,0581 em média em P1 para cada acréscimo médio de 0.008 em ACH.
+
+Para AFF:
+tem -se o modelo P1=β0+β1AFF em que é dados por β0=0,77 e β1=-2,58 há um decréscimo de -0,0306 em P1 para cada acréscimo médio de 0,012 em AFF.
+
+Para PWR:
+tem -se o modelo P1=β0+β1PWR em que é dados por β0=0,77 e β1=-14,44 há um decréscimo de -0,1284 em P1 para cada acréscimo médio de 0,008 em PWR.
+
+Se o Presidente for o Fernandez
+
+Para ACH:
+tem -se o modelo P1=β0+β1ACH em que é dados por β0=0,5263 e β1=-14,54, de forma que, há um decréscimo de -0,1163 em média em P1 para cada acréscimo médio de 0.008 em ACH.
+
+Para AFF:
+tem -se o modelo P1=β0+β1AFF em que é dados por β0=0,5263 e β1=10,87 há um acréscimo de 0,1304 em P1 para cada acréscimo médio de 0,012 em AFF.
+
+Para PWR:
+tem -se o modelo P1=β0+β1PWR em que é dados por β0=0,77 e β1=-10,02 há um decréscimo de -0,08 em P1 para cada acréscimo médio de 0,008 em PWR.
+
+Se o Presidente for o Lopes Obrador
+
+Para ACH:
+tem -se o modelo P1=β0+β1ACH em que é dados por β0=0,4942 e β1=-5,83, de forma que, há um decréscimo de -0,0466 em média em P1 para cada acréscimo médio de 0.008 em ACH.
+
+Para AFF:
+tem -se o modelo P1=β0+β1AFF em que é dados por β0=0,4942 e β1=11,99 há um acréscimo de 0,1438 em P1 para cada acréscimo médio de 0,012 em AFF.
+
+Para PWR:
+tem -se o modelo P1=β0+β1PWR em que é dados por β0=0,77 e β1=-12,62 há um decréscimo de -0,1011 em P1 para cada acréscimo médio de 0,008 em PWR.
+
+***Teste para comparação de dois coeficientes de inclinação***
+
+Pode ser realizado de acordo com Paternoster et al.(1998)
+[Z=(beta1-beta2)/sqrt(SEb1²+SEb2²)], os erros quadráticos são combinados.
+
+Para Bolsonaro
+
+***ACH vs AFF***
+```{r}
+beta1=12.90
+beta2=21.88
+SEb1=6.29
+SEb2=5.14
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+```{r}
+Z=abs(Z)
+1-pnorm(Z)
+```
+não difere
+
+***ACH vs PWR***
+```{r}
+beta1=12.90
+beta2=7.62
+SEb1=6.29
+SEb2=5.54
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+```{r}
+1-pnorm(Z)
+```
+não difere
+
+***AFF vs PWR***
+```{r}
+beta1=21.88
+beta2=7.62
+SEb1=5.14
+SEb2=5.54
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+```{r}
+1-pnorm(Z)
+```
+difere
+
+Para Duque
+
+***ACH vs AFF***
+
+```{r}
+beta1=-5.81
+beta2=-2.58
+SEb1=(8.53+6.29)/2
+SEb2=(5.14+6.14)/2
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+```{r}
+Z=abs(Z)
+1-pnorm(Z)
+```
+não difere
+
+***ACH vs PWR***
+
+```{r}
+beta1=-5.81
+beta2=-14.44
+SEb1=(8.53+6.29)/2
+SEb2=(5.54+8.14)/2
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+
+```{r}
+1-pnorm(Z)
+```
+não difere
+
+
+***AFF vs PWR***
+```{r}
+beta1=-2.51
+beta2=-14.44
+SEb1=(8.53+6.29)/2
+SEb2=(5.54+8.14)/2
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+
+```{r}
+1-pnorm(Z)
+```
+
+não difere
+
+Para Fernandez
+
+***ACH vs AFF***
+```{r}
+beta1=-14.54
+beta2=-10.87
+SEb1=(9.32+6.29)/2
+SEb2=(5.14+6.47)/2
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+```{r}
+Z=abs(Z)
+1-pnorm(Z)
+```
+
+não difere 
+
+***ACH vs PWR***
+
+```{r}
+beta1=-14.54
+beta2=-10.02
+SEb1=(9.32+6.29)/2
+SEb2=(5.54+7.56)/2
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+
+```{r}
+Z=abs(Z)
+1-pnorm(Z)
+```
+não difere 
+
+***AFF vs PWR***
+```{r}
+beta1=10.87
+beta2=-10.02
+SEb1=(5.14+6.47)/2
+SEb2=(5.54+7.56)/2
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+```{r}
+1-pnorm(Z)
+```
+
+difere
+
+
+Para Lopez Obrador
+
+
+***ACH vs AFF***
+```{r}
+beta1=-5.83
+beta2=11.99
+SEb1=(13.33+6.29)/2
+SEb2=(5.14+8.16)/2
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+```{r}
+Z=abs(Z)
+1-pnorm(Z)
+```
+
+não difere
+
+
+***ACH vs PWR***
+
+
+```{r}
+beta1=-5.83
+beta2=-14.44
+SEb1=(13.33+6.29)/2
+SEb2=(5.54+6.99)/2
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+```{r}
+1-pnorm(Z)
+## [1] 0.2297411
+```
+
+não difere
+
+
+***AFF vs PWR***
+
+```{r}
+beta1=11.99
+beta2=-14.44
+SEb2=(5.14+8.16)/2
+SEb2=(5.54+6.99)/2
+Z=(beta1-beta2)/sqrt(SEb1^2+SEb2^2)
+Z
+```
+
+```{r}
+1-pnorm(Z)
+```
+
+difere
+
+
+
+```{r}
+#teste Kruskal-Walis para comparação de grupos com dados não paramétricos
+kruskal.test(ACH ~ Presidente, data= df_menor_out)
+kruskal.test(AFF ~ Presidente, data= df_menor_out)
+kruskal.test(PWR ~ Presidente, data= df_menor_out)
+```
+
+No teste de Kruskal para ACH no grupo Presidente, não há diferença entre as medianas, mas está no limite com p-valor 0,05536.
+No teste de Kruskal para AFF no grupo Presidente,  há diferença entre as medianas, com p-valor menor que 0,05.
+No teste de Kruskal para PWR no grupo Presidente,  há diferença entre as medianas, com p-valor menor que 0,05.
+
+
+```{r}
+#teste post-hoc
+dunn_test(ACH ~ Presidente, data = df_menor, p.adjust.method = "bonferroni")
+dunn_test(AFF ~ Presidente, data = df_menor, p.adjust.method = "bonferroni")
+dunn_test(PWR ~ Presidente, data = df_menor, p.adjust.method = "bonferroni")
+```
+
+O teste pot-hoc confirma do teste de Kruskal-Walis. Exceto para ACH para Duque e Obrador cuja diferença é estatisticamente signficante.
+
+
+```{r}
+#Análise descritiva dos dados
+
+df_menor_out %>% group_by(Presidente) %>% 
+  get_summary_stats(ACH, AFF, PWR, type = "median_iqr")
+
+```
+
+***Análise descritiva***
+
+Para Bolsonaro, a mediana ACH = PWR = 0,008, a mediana AFF= 0,016;
+
+Para Duque, a mediana ACH = 0,009, a mediana PWR = 0,005, a mediana AFF= 0,011;
+
+Para Fernandez, mediana ACH = PWR = 0,008, a mediana AFF= 0,013;
+
+Para Lopez Obrador, a mediana ACH = 0,007, a mediana PWR = 0,011, a mediana AFF= 0,008.
+
+
+```{r}
+# Visualização dos dados
+par(mfrow=c(1,3))
+boxplot(ACH ~ Presidente, data = df_menor_out)
+boxplot(AFF ~ Presidente, data = df_menor_out)
+boxplot(PWR ~ Presidente, data = df_menor_out)
+```
+
+
+O teste de Kruskal-Walis corroborou o achado da regressão e das diferenças dos betas. Lembrando que essas variáveis ACH, AFF e PWR possuem a mesma unidade de frequência de palavras.
+
+Para Bolsonaro, nos testes de comparação entre betas do modelo m3, β(PWR) != β(AFF); no teste Kruskal-Walis, AFF> ACH = PWR
+Para Duque, nos testes de comparação entre betas do modelo m3, β(PWR) = β(AFF) = β(ACH); no teste Kruskal-Walis, AFF> ACH> PWR 
+Para Fernandez, nos testes de comparação entre betas do modelo m3, β(PWR) != β(AFF); no teste Kruskal-Walis, AFF> ACH = PWR
+Para Lopez Obrador, nos testes de comparação entre betas do modelo m3, β(PWR) != β(AFF); no teste Kruskal-Walis;PWR> AFF(mediana 0,007)=ACH (mediada 0,008)
+
+
+
+
+
